@@ -1,75 +1,98 @@
 import cv2
 import numpy as np
+from functools import reduce
+import math
+import operator
 
-def find_max_contour(img):
+
+def sort_points(coords):
+    coords = sorted(coords, key=lambda x:x[0])
+    l, r = coords[:2], coords[2:]
+    l = sorted(l, key=lambda x:x[1])
+    r = sorted(r, key=lambda x:x[1])
+    return np.array([l[0], r[0], r[1], l[1]])
+
+
+def find_corners(contour, img):
+    es = cv2.arcLength(contour, True)*0.04
+    approx = cv2.approxPolyDP(contour, es, True)
+    coords = np.squeeze(approx)
+    coords = sort_points(coords)
+    for coor in coords:
+        x, y = coor[0], coor[1]
+        image = cv2.circle(img, (x,y), 0, (255,0,0), 6)
+    cv2.imshow('corners', image)
+    cv2.waitKey(0)
+    return coords
+
+
+def find_sudoku(img, ori):
+    w_ori = img.shape[1]
+    h_ori = img.shape[0]
+    thresh_area = (w_ori*h_ori)/3
     edges = cv2.Canny(img, 100, 200, apertureSize=5)
-    contours, _ = cv2.findContours(edges.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    sorted_contours= sorted(contours, key=cv2.contourArea, reverse= True)
-    return sorted_contours[0]
-
-
-def find_corners(contour):
-    # find approx points of the contour
-    # repeat approx points until we have 4 corner points
-    c_points =None
-    d = 0
-    while True:
-        d += 1
-        c_points = cv2.approxPolyDP(contour, d, 1)
-        if len(c_points) == 4:
-            break
-    c_points = np.squeeze(c_points)
-    # sort points
-    center = np.mean(c_points, axis=0)
-    sorted_c_points = [
-        c_points[np.where(np.logical_and(c_points[:, 0] < center[0], c_points[:, 1] < center[1]))[0][0], :],
-        c_points[np.where(np.logical_and(c_points[:, 0] > center[0], c_points[:, 1] < center[1]))[0][0], :],
-        c_points[np.where(np.logical_and(c_points[:, 0] > center[0], c_points[:, 1] > center[1]))[0][0], :],
-        c_points[np.where(np.logical_and(c_points[:, 0] < center[0], c_points[:, 1] > center[1]))[0][0], :]
-    ]
-    return sorted_c_points
-
-
-def transform(src_points, dst_points, original, preprocessed, w, h):
-    # Get the transform
-    m = cv2.getPerspectiveTransform(np.float32(src_points), np.float32(dst_points))
+    contours, _ = cv2.findContours(edges.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    i = 0
+    c_list = []
+    
+    cv2.waitKey(0)
+    for c in contours:
+        _,_,w,h = cv2.boundingRect(c)
+        if w*h < thresh_area:
+            continue
+        if abs((w-h)/h) > 0.15:
+            continue
+        c_list.append(c)
+        # img2 = img.copy()
+        # img2 = img2[y:y+h, x:x+w]
+        # cv2.imshow(f'{i}', img2)
+        # i+=1
+        # cv2.waitKey(0)
+    if len(c_list) == 0:
+        return None
+    
+    max_area = cv2.contourArea(c_list[0])
+    max_contour = c_list[0]
+    for i in range(1, len(c_list)):
+        if cv2.contourArea(c_list[i]) > max_area:
+            max_contour = c_list[i]
+    
+    imgtest = ori.copy()
+    cv2.drawContours(imgtest, [max_contour], 0, (0, 0, 255), 3)
+    cv2.imshow('max', imgtest)
+    cv2.waitKey(0)
+    (_, _), (w, h), _ = cv2.minAreaRect(max_contour)
+    src_pts = find_corners(max_contour, ori.copy())
+    dst_points = [[0, 0], [w, 0], [w, 
+    h], [0, h]]
+    M = cv2.getPerspectiveTransform(np.float32(src_pts), np.float32(dst_points))
     # Transform the image
-    o_out = cv2.warpPerspective(original, m, (int(w), int(h)))
-    p_out = cv2.warpPerspective(preprocessed, m, (int(w), int(h)))
-    return o_out, p_out
-
-
-def extract_sudoku(preprocessed, original):
-    grid = find_max_contour(preprocessed)
-    c_points = find_corners(grid)
-    # find width and height of grid
-    (_, _), (w, h), _ = cv2.minAreaRect(grid)
-    dst_points = [[0, 0], [w, 0], [w, h], [0, h]]
-    o_out, p_out = transform(c_points, dst_points, original, preprocessed, w, h)
-    return o_out, p_out
+    o_out = cv2.warpPerspective(ori, M, (int(w), int(h)))
+    p_out = cv2.warpPerspective(img, M, (int(w), int(h)))
+    return o_out, p_out, M
 
 
 def preprocess_digit(img):
+
     pre = cv2.resize(img, (28, 28))
     pre = pre.reshape(28, 28, 1)
-    return pre/255
+    return pre
 
 
 def extract_digits(img):
-    digits = {}
     # get all connected components from image
     cnt, _, stats, centroids = cv2.connectedComponentsWithStats(img)
     # create dst image to work with
     # dst = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     # calculate cell size so that we do not add anything that is bigger than cell size
-    cell_size = img.shape[0]*img.shape[1]//81
+    cell_area = img.shape[0]*img.shape[1]//81
     # loop through connected components
     digits = []
     coors = []
     for i in range(0, cnt):
         (x, y, w, h, area) = stats[i]
         # if too small, ignore
-        if area < 20:
+        if w*h < cell_area*0.05:
             continue
         # calculate x_coor & y_coor from centroid
         x_coor = int((centroids[i][0]/img.shape[1]*9-0.5).round())
@@ -77,16 +100,17 @@ def extract_digits(img):
         # cv2.rectangle(dst, (x, y, w, h), (0, 255, 255))
         # crop digit
         digit = img[y:y+h, x:x+w]
-        digit_size = digit.shape[0]*digit.shape[1]
+        digit_area = digit.shape[0]*digit.shape[1]*0.7
+        if digit_area > cell_area:
+            continue
         # if img is bigger than cellsize, its not a digit
-        if digit_size <= cell_size:
             # pad image
-            top = (img.shape[0]//9 - digit.shape[0]) // 2
-            bottom = (img.shape[0]//9 - digit.shape[0]) // 2
-            left = (img.shape[1]//9 - digit.shape[1]) // 2
-            right = (img.shape[1]//9 - digit.shape[1]) // 2
-            digit = cv2.copyMakeBorder(digit, top, bottom, left, right, cv2.BORDER_CONSTANT, None, 0)
-            digits.append(preprocess_digit(digit))
-            coors.append((x_coor, y_coor))
+        top = (img.shape[0]//9 - digit.shape[0]) // 2
+        bottom = (img.shape[0]//9 - digit.shape[0]) // 2
+        left = (img.shape[1]//9 - digit.shape[1]) // 2
+        right = (img.shape[1]//9 - digit.shape[1]) // 2
+        digit = cv2.copyMakeBorder(digit, top, bottom, left, right, cv2.BORDER_CONSTANT, None, 0)
+        digits.append(preprocess_digit(digit))
+        coors.append((x_coor, y_coor))
     # cv2.imwrite('digit.png', dst)
     return digits, coors
