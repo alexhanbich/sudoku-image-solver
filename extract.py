@@ -49,7 +49,7 @@ def find_sudoku(img, ori):
         # i+=1
         # cv2.waitKey(0)
     if len(c_list) == 0:
-        return None
+        return None, None, None
     
     max_area = cv2.contourArea(c_list[0])
     max_contour = c_list[0]
