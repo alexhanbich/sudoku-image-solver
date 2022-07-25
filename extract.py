@@ -20,9 +20,7 @@ def find_corners(contour, img):
     coords = sort_points(coords)
     for coor in coords:
         x, y = coor[0], coor[1]
-        image = cv2.circle(img, (x,y), 0, (255,0,0), 6)
-    cv2.imshow('corners', image)
-    cv2.waitKey(0)
+        # image = cv2.circle(img, (x,y), 0, (255,0,0), 6)
     return coords
 
 
@@ -34,20 +32,17 @@ def find_sudoku(img, ori):
     contours, _ = cv2.findContours(edges.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
     i = 0
     c_list = []
-    
-    cv2.waitKey(0)
     for c in contours:
         _,_,w,h = cv2.boundingRect(c)
         if w*h < thresh_area:
             continue
         if abs((w-h)/h) > 0.15:
             continue
+        es = cv2.arcLength(c, True)*0.04
+        approx = cv2.approxPolyDP(c, es, True)
+        if len(approx != 4):
+            continue
         c_list.append(c)
-        # img2 = img.copy()
-        # img2 = img2[y:y+h, x:x+w]
-        # cv2.imshow(f'{i}', img2)
-        # i+=1
-        # cv2.waitKey(0)
     if len(c_list) == 0:
         return None, None, None
     
@@ -57,10 +52,6 @@ def find_sudoku(img, ori):
         if cv2.contourArea(c_list[i]) > max_area:
             max_contour = c_list[i]
     
-    imgtest = ori.copy()
-    cv2.drawContours(imgtest, [max_contour], 0, (0, 0, 255), 3)
-    cv2.imshow('max', imgtest)
-    cv2.waitKey(0)
     (_, _), (w, h), _ = cv2.minAreaRect(max_contour)
     src_pts = find_corners(max_contour, ori.copy())
     dst_points = [[0, 0], [w, 0], [w, 
